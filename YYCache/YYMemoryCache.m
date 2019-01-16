@@ -94,50 +94,54 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     CFDictionarySetValue(_dic, (__bridge const void *)(node->_key), (__bridge const void *)(node));
     _totalCost += node->_cost;
     _totalCount++;
-    if (_head) {
+    if (_head) { //如果有头结点，则在把节点插到头结点之前
         node->_next = _head;
         _head->_prev = node;
         _head = node;
-    } else {
+    } else { //如果莫得头结点，说明是个空的链表，头结点和尾节点都设置为该节点
         _head = _tail = node;
     }
 }
 
 - (void)bringNodeToHead:(_YYLinkedMapNode *)node {
-    if (_head == node) return;
+    if (_head == node) return; //是头结点，直接return
     
-    if (_tail == node) {
+    if (_tail == node) { //如果是尾节点，把倒数第二个设置为尾节点
         _tail = node->_prev;
-        _tail->_next = nil;
-    } else {
+        _tail->_next = nil; //尾节点莫得后驱
+    } else { //如果是中间节点，让上一个节点跟下一个节点对接起来
         node->_next->_prev = node->_prev;
         node->_prev->_next = node->_next;
     }
-    node->_next = _head;
-    node->_prev = nil;
+    node->_next = _head; //最后把节点设置为头结点
+    node->_prev = nil;  //头节点莫得前驱
     _head->_prev = node;
     _head = node;
 }
 
-- (void)removeNode:(_YYLinkedMapNode *)node {
+- (void)removeNode:(_YYLinkedMapNode *)node {//有一个疑问是为什么被删掉的节点不要释放内存(难道是因为使用自动引用计数，无需管理？)
     CFDictionaryRemoveValue(_dic, (__bridge const void *)(node->_key));
     _totalCost -= node->_cost;
     _totalCount--;
+    //如果节点有后驱，将该节点的前驱赋值给该节点的后驱节点的前驱（意思是他的前驱节点和后驱节点绕开它直接建立联系），考虑特殊情况头结点，相当于nil赋值给第二节点的前驱，某得毛病。
     if (node->_next) node->_next->_prev = node->_prev;
+    //如果有前驱，将该节点的后驱赋值给该节点的前驱节点的后驱，同样考虑特殊情况尾节点，相当于nil赋值给倒数第二节点的后驱。
+    //上一个判断就已经删除掉除了尾节点的所有节点，所以不少人会直接用if-else，判断了节点的前驱是否存在可以防止出现nil->_prev的情况的出现
     if (node->_prev) node->_prev->_next = node->_next;
-    if (_head == node) _head = node->_next;
+    if (_head == node) _head = node->_next; //如果把头、尾节点给删了，还是要把坑补上的
     if (_tail == node) _tail = node->_prev;
 }
 
 - (_YYLinkedMapNode *)removeTailNode {
+    //2. 在这个方法里面，双向链表的节点数量没有发生改变，那么双向链表的节点改变发生在哪里？
     if (!_tail) return nil;
     _YYLinkedMapNode *tail = _tail;
     CFDictionaryRemoveValue(_dic, (__bridge const void *)(_tail->_key));
     _totalCost -= _tail->_cost;
     _totalCount--;
-    if (_head == _tail) {
+    if (_head == _tail) { //头部等于尾部，说明只有一个节点
         _head = _tail = nil;
-    } else {
+    } else { //将尾节点的前驱赋值为尾节点
         _tail = _tail->_prev;
         _tail->_next = nil;
     }
@@ -150,7 +154,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
     _head = nil;
     _tail = nil;
     if (CFDictionaryGetCount(_dic) > 0) {
-        CFMutableDictionaryRef holder = _dic;
+        CFMutableDictionaryRef holder = _dic; //删除旧值，重新new新值
         _dic = CFDictionaryCreateMutable(CFAllocatorGetDefault(), 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
         
         if (_releaseAsynchronously) {
@@ -219,13 +223,13 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
             }
             pthread_mutex_unlock(&_lock);
         } else {
-            usleep(10 * 1000); //10 ms
+            usleep(10 * 1000); //10 ms  //usleep()函数的功能是把调用该函数的线程挂起一段时间 单位是微秒(microseconds)
         }
     }
     if (holder.count) {
         dispatch_queue_t queue = _lru->_releaseOnMainThread ? dispatch_get_main_queue() : YYMemoryCacheGetReleaseQueue();
         dispatch_async(queue, ^{
-            [holder count]; // release in queue
+            [holder count]; // release in queue 为什么一定指定用户释放的线程呢？
         });
     }
 }
@@ -444,6 +448,7 @@ static inline dispatch_queue_t YYMemoryCacheGetReleaseQueue() {
         if (_lru->_releaseAsynchronously) {
             dispatch_queue_t queue = _lru->_releaseOnMainThread ? dispatch_get_main_queue() : YYMemoryCacheGetReleaseQueue();
             dispatch_async(queue, ^{
+                // 让noded在queue中释放，可是这又有啥意义呢？
                 [node class]; //hold and release in queue
             });
         } else if (_lru->_releaseOnMainThread && !pthread_main_np()) {
